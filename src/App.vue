@@ -1,5 +1,6 @@
+
 <script setup>
-  import { onMounted, reactive, ref, watch } from 'vue';
+  import { computed, onMounted, provide, reactive, ref, watch } from 'vue';
   import axios from 'axios';
 
   import Drawer from './components/Drawer.vue';
@@ -7,11 +8,65 @@
   import CardList from './components/CardList.vue';
 
   const items = ref([]);
+  const cart = ref([]);
+  const isCreatingOrder = ref(false);
+
+  const drawerOpen = ref(false);
+
+  const closeDrawer = () => {
+    drawerOpen.value = false;
+  }
+
+  const openDrawer = () => {
+    drawerOpen.value = true;
+  }
+
+  const totalPrice = computed(() => cart.value.reduce((acc, item) => acc + item.price, 0));
+  const vatPrice = computed(() => Math.round((totalPrice.value * 5) / 100));
+
+  const carButtonDisabled = computed(() => isCreatingOrder.value ? true : totalPrice.value ? false : true)
 
   const filters = reactive({
     sortBy: 'name',
     searchQuary: ''
   });
+
+  const addToCart = (item) => {
+      cart.value.push(item);
+      item.isAdded = true;
+  }
+
+  const removeFromCart = (item) => {
+      cart.value.splice(cart.value.indexOf(item), 1);
+      item.isAdded = false;
+  }
+
+  const createOrder = async () => {
+    try{
+      isCreatingOrder.value = true;
+      const { data } = await axios.post(`https://65ae38eeee4ab932.mokky.dev/orders`, {
+        items: cart.value,
+        totalPrice: totalPrice.value,
+      })
+      cart.value = [];
+
+      return data;
+    } catch(err) {
+      console.log(err);
+    } finally {
+      isCreatingOrder.value = false;
+    }
+  }
+
+  const onClickAddPlus = (item) => {
+    if(!item.isAdded) {
+      addToCart(item);
+    } else {
+      removeFromCart(item);
+    }  
+
+    console.log(cart.value);
+  }
 
   const onChangeSelect = (event) => {
     filters.sortBy = event.target.value;
@@ -24,8 +79,8 @@
   const fetchFavorites = async () => {
     try {
         const { data: favorites } = await axios.get(`https://65ae38eeee4ab932.mokky.dev/favorites`);
-
-        items.value = items.value.map(item => {
+        
+        items.value = items.value.map((item) => {
           const favorite = favorites.find(favorite => favorite.parentId === item.id);
 
           if(!favorite) {
@@ -37,18 +92,12 @@
             isFavorited: true,
             favoriteId: favorite.id
           }
-        })
-        
-        
-        console.log(data)
-        items.value = data;
+        });
+
+        console.log(items.value);
       } catch(err) {
         console.log(err);
       }
-  }
-
-  const addToFavorited = async (item) => {
-    item.isFavorited = true;
   }
 
   const fetchItems = async () => {
@@ -69,6 +118,7 @@
         items.value = data.map(obj => ({
           ...obj,
           isFavorited: false,
+          favoriteId: null,
           isAdded: false
         }));
       } catch(err) {
@@ -76,19 +126,56 @@
       }
   }
 
+  const addToFavorited = async (item) => {
+    try {
+      if(!item.isFavorited) {
+        const obj = {
+        parentId: item.id,
+      }
+
+      item.isFavorited = !item.isFavorited;
+      const { data } = await axios.post(`https://65ae38eeee4ab932.mokky.dev/favorites`, obj);
+      item.favoriteId = data.id;
+
+
+      console.log(data);
+    } else {
+      item.isFavorited = false;
+      const { data } = await axios.delete(`https://65ae38eeee4ab932.mokky.dev/favorites/${item.favoriteId}`);
+      item.favoriteId = null;
+    }
+    } catch(e) {
+      console.log(e);
+    }
+  }
+
   onMounted(async () => {
     await fetchItems();
     await fetchFavorites();
   });
   watch(filters, fetchItems);
+
+  provide("cart", {
+    cart,
+    closeDrawer,
+    openDrawer,
+    addToCart,
+    removeFromCart
+  });
 </script>
 
 <template>
-  <!-- <Drawer /> -->
+  <Drawer 
+  v-if="drawerOpen" 
+  :total-price="totalPrice" 
+  :vat-price="vatPrice" 
+  :button-disabled = "cartButtonDisabled"
+  @create-order="createOrder"/>
+
  <div
   class="bg-white w-4/5 m-auto rounded-xl shadow-xl mt-14"
  >
-  <Header />
+  <Header :total-price="totalPrice" @open-drawer="openDrawer" />
 
 
   <div class="p-10">
@@ -119,7 +206,7 @@
     </div>
 
     <div class="mt-10">
-      <CardList :items="items"/>
+      <CardList :items="items" @add-to-favorited="addToFavorited" @add-to-cart="onClickAddPlus"/>
     </div>
   </div>
 
